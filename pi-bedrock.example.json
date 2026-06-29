@@ -1,0 +1,18 @@
+{
+  "_comment": "pi-bedrock config. core = always injected (relative to vault). projects = injected when cwd is inside their path; each may have a memory dir scanned for .md files.",
+  "vault": "~/GitLib/dev.a7exschin.knowledge",
+  "core": [
+    "_core/me.md",
+    "_core/ai-conduct.md",
+    "_core/conventions.md",
+    "_core/preferences.md"
+  ],
+  "projects": [
+    {
+      "path": "~/GitLib/dev.a7exschin.knowledge",
+      "name": "Knowledge Vault",
+      "files": ["_core/meta.md"],
+      "memory": "03-agents/03-memory/"
+    }
+  ]
+}

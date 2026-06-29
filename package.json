@@ -1,0 +1,26 @@
+{
+  "name": "pi-bedrock",
+  "version": "0.1.0",
+  "description": "Pi extension that injects vault core files, project-scoped files, and ephemeral notes into the system prompt — compaction-proof context.",
+  "keywords": [
+    "pi-package"
+  ],
+  "license": "MIT",
+  "author": "Alexander Schindler",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/A7exSchin/pi-bedrock.git"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "devDependencies": {
+    "vitest": "^4.1.9"
+  }
+}
