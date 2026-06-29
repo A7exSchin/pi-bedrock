@@ -192,8 +192,9 @@ export default function piBedrock(pi: ExtensionAPI) {
 				lines.push("── Core (always injected) ──");
 				for (const rel of config.core) {
 					const exists = fs.existsSync(path.join(config.vault, rel));
+					const indicator = exists ? "●" : "?";
 					const dup = duplicationWarnings.includes(rel) ? " ⚠ also in AGENTS.md" : "";
-					lines.push(`  ${exists ? "●" : "○"} ${rel}${dup}`);
+					lines.push(`  ${indicator} ${rel}${dup}`);
 				}
 
 				if (config.projects.length > 0) {
@@ -207,7 +208,8 @@ export default function piBedrock(pi: ExtensionAPI) {
 						if (proj.root) lines.push(`    root: ${proj.root}`);
 						for (const rel of proj.files) {
 							const exists = fs.existsSync(path.join(root, rel));
-							lines.push(`    ${exists ? "●" : "○"} ${rel}`);
+							const indicator = !exists ? "?" : active ? "●" : "○";
+							lines.push(`    ${indicator} ${rel}`);
 						}
 						if (proj.memory) {
 							const memFiles = readMemoryDir(root, proj.memory);

@@ -73,6 +73,16 @@ Config lives at `~/.pi/agent/pi-bedrock.json` (override with env `PI_BEDROCK_CON
 /bedrock reload       Re-read config from disk
 ```
 
+## Indicators
+
+`/bedrock list` uses the following symbols to show file state:
+
+| Symbol | Meaning |
+|--------|--------------------------------------------------|
+| `●` | **Loaded** — file exists and is actively injected |
+| `○` | **Not loaded** — file exists but project is inactive |
+| `?` | **Missing** — file is configured but not found on disk |
+
 ## License
 
 MIT
