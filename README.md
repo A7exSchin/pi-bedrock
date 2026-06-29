@@ -56,10 +56,11 @@ Config lives at `~/.pi/agent/pi-bedrock.json` (override with env `PI_BEDROCK_CON
 | `vault` | yes | Vault root (`~` expanded). Core files resolve relative to it. |
 | `core` | yes | Files injected every session, relative to `vault`. |
 | `projects` | no | Project entries injected when cwd is inside `path`. |
-| `projects[].path` | yes | Project directory (`~` expanded). |
+| `projects[].path` | yes | Project directory (`~` expanded). Triggers injection when cwd is inside. |
 | `projects[].name` | no | Display name. Defaults to directory basename. |
-| `projects[].files` | yes | Files relative to project path. |
-| `projects[].memory` | no | Directory relative to project path; all `.md` files injected. |
+| `projects[].root` | no | Directory where `files` and `memory` resolve from. Defaults to `path`. |
+| `projects[].files` | yes | Files relative to `root` (or `path` if root unset). |
+| `projects[].memory` | no | Directory relative to `root` (or `path`); all `.md` files injected. |
 
 ## Commands
 

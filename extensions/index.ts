@@ -78,8 +78,9 @@ export default function piBedrock(pi: ExtensionAPI) {
 				if (loadedPaths.has(abs)) overlaps.push(rel);
 			}
 			for (const proj of config.projects) {
+				const root = proj.root ?? proj.path;
 				for (const rel of proj.files) {
-					const abs = path.resolve(proj.path, rel);
+					const abs = path.resolve(root, rel);
 					if (loadedPaths.has(abs)) overlaps.push(`${proj.name ?? path.basename(proj.path)}/${rel}`);
 				}
 			}
@@ -113,13 +114,14 @@ export default function piBedrock(pi: ExtensionAPI) {
 		// Project-scoped context
 		for (const proj of config.projects) {
 			if (!isInsidePath(cwd, proj.path)) continue;
-			const projFiles = readFiles(proj.path, proj.files);
+			const root = proj.root ?? proj.path;
+			const projFiles = readFiles(root, proj.files);
 			const label = proj.name ?? path.basename(proj.path);
 			const ps = formatSection(`Project: ${label}`, projFiles);
 			if (ps) sections.push(ps);
 			// Memory directory
 			if (proj.memory) {
-				const memFiles = readMemoryDir(proj.path, proj.memory);
+				const memFiles = readMemoryDir(root, proj.memory);
 				const ms = formatSection(`Memory: ${label}`, memFiles);
 				if (ms) sections.push(ms);
 			}
@@ -199,14 +201,16 @@ export default function piBedrock(pi: ExtensionAPI) {
 					lines.push(`── Projects (${config.projects.length} configured) ──`);
 					for (const proj of config.projects) {
 						const active = isInsidePath(cwd, proj.path);
+						const root = proj.root ?? proj.path;
 						const label = proj.name ?? path.basename(proj.path);
 						lines.push(`  ${active ? "●" : "○"} ${label} (${proj.path})${active ? " — ACTIVE" : ""}`);
+						if (proj.root) lines.push(`    root: ${proj.root}`);
 						for (const rel of proj.files) {
-							const exists = fs.existsSync(path.join(proj.path, rel));
+							const exists = fs.existsSync(path.join(root, rel));
 							lines.push(`    ${exists ? "●" : "○"} ${rel}`);
 						}
 						if (proj.memory) {
-							const memFiles = readMemoryDir(proj.path, proj.memory);
+							const memFiles = readMemoryDir(root, proj.memory);
 							lines.push(`    ↳ memory: ${proj.memory} (${memFiles.length} file(s))`);
 						}
 					}

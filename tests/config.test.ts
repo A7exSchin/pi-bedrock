@@ -85,4 +85,18 @@ describe("loadConfig", () => {
 		expect(config?.projects[0].memory).toBe("mem/");
 		expect(config?.projects[1].memory).toBeUndefined();
 	});
+
+	it("expands ~ in root and defaults root to undefined when absent", () => {
+		writeConfig({
+			vault: "/v",
+			core: ["a.md"],
+			projects: [
+				{ path: "/proj", root: "~/vault", files: ["x.md"] },
+				{ path: "/other", files: ["y.md"] },
+			],
+		});
+		const { config } = loadConfig(configPath);
+		expect(config?.projects[0].root).toBe(path.join(os.homedir(), "vault"));
+		expect(config?.projects[1].root).toBeUndefined();
+	});
 });

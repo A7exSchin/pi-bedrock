@@ -3,9 +3,11 @@ export interface ProjectConfig {
 	path: string;
 	/** Display name for status/list output. Defaults to directory basename. */
 	name?: string;
-	/** Files relative to project path — injected when cwd is inside project. */
+	/** Root directory for resolving `files` and `memory`. Defaults to `path`. */
+	root?: string;
+	/** Files relative to `root` (or `path` if root is unset). */
 	files: string[];
-	/** Optional memory directory relative to project path — all .md files scanned. */
+	/** Optional memory directory relative to `root` (or `path`) — all .md files scanned. */
 	memory?: string;
 }
 

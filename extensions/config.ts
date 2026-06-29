@@ -20,6 +20,7 @@ export function loadConfig(configPath: string = CONFIG_PATH): LoadResult {
 					projects.push({
 						path: expandHome(p.path),
 						name: p.name,
+						root: typeof p.root === "string" ? expandHome(p.root) : undefined,
 						files: p.files,
 						memory: typeof p.memory === "string" ? p.memory : undefined,
 					});

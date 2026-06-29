@@ -1,5 +1,5 @@
 {
-  "_comment": "pi-bedrock config. core = always injected (relative to vault). projects = injected when cwd is inside their path; each may have a memory dir scanned for .md files.",
+  "_comment": "pi-bedrock config. core = always injected (relative to vault). projects = injected when cwd is inside their path; files/memory resolve from root (defaults to path).",
   "vault": "~/GitLib/dev.a7exschin.knowledge",
   "core": [
     "_core/me.md",
@@ -12,6 +12,13 @@
       "path": "~/GitLib/dev.a7exschin.knowledge",
       "name": "Knowledge Vault",
       "files": ["_core/meta.md"],
+      "memory": "03-agents/03-memory/"
+    },
+    {
+      "path": "~/GitLib/my-app",
+      "name": "My App",
+      "root": "~/GitLib/dev.a7exschin.knowledge",
+      "files": ["02-knowledge/my-app-runbook.md"],
       "memory": "03-agents/03-memory/"
     }
   ]
