@@ -10,6 +10,13 @@ export function expandHome(p: string): string {
 	return p;
 }
 
+/** Shorten an absolute path by replacing the home directory with ~. */
+export function shortenHome(p: string): string {
+	if (p === HOME) return "~";
+	if (p.startsWith(HOME + "/")) return "~" + p.slice(HOME.length);
+	return p;
+}
+
 /** True if `cwd` is `dir` itself or lives inside it. */
 export function isInsidePath(cwd: string, dir: string): boolean {
 	const resolved = path.resolve(cwd);

@@ -26,7 +26,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { ProjectConfig } from "./types.js";
 import { loadConfig, CONFIG_PATH } from "./config.js";
-import { isInsidePath } from "./paths.js";
+import { isInsidePath, shortenHome } from "./paths.js";
 import { readFile, readFiles, readMemoryDir, findMissingFiles } from "./files.js";
 import { formatSection } from "./format.js";
 import { estimateTokens, formatTokens } from "./tokens.js";
@@ -226,7 +226,7 @@ export default function piBedrock(pi: ExtensionAPI) {
 				const cwd = ctx.cwd ?? process.cwd();
 				const lines: string[] = [];
 
-				lines.push(`vault: ${config.vault}`);
+				lines.push(`vault: ${shortenHome(config.vault)}`);
 				if (lastInjectionTokens !== null) {
 					lines.push(`total injection: ${formatTokens(lastInjectionTokens)}`);
 				}
@@ -255,25 +255,43 @@ export default function piBedrock(pi: ExtensionAPI) {
 						const root = proj.root ?? proj.path;
 						const label = proj.name ?? path.basename(proj.path);
 						let projTokens = 0;
-						lines.push(`  ${active ? "●" : "○"} ${label} (${proj.path})${active ? " — ACTIVE" : ""}`);
-						if (proj.root) lines.push(`    root: ${proj.root}`);
+
+						// Pre-calculate tokens for the header
+						const fileTokens: { rel: string; exists: boolean; tokens: number }[] = [];
 						for (const rel of proj.files) {
 							const filePath = path.join(root, rel);
 							const content = readFile(filePath);
 							const exists = content !== null;
-							const indicator = !exists ? "?" : active ? "●" : "○";
 							const tokens = exists ? estimateTokens(content) : 0;
 							projTokens += tokens;
-							const tokenLabel = exists ? ` (${formatTokens(tokens)})` : "";
-							lines.push(`    ${indicator} ${rel}${tokenLabel}`);
+							fileTokens.push({ rel, exists, tokens });
+						}
+						let memFiles: ReturnType<typeof readMemoryDir> = [];
+						let memTokens = 0;
+						if (proj.memory) {
+							memFiles = readMemoryDir(root, proj.memory);
+							memTokens = memFiles.reduce((sum, f) => sum + estimateTokens(f.content), 0);
+							projTokens += memTokens;
+						}
+
+						// Project header
+						lines.push(`  ${active ? "●" : "○"} ${label}${active ? " — ACTIVE" : ""}`);
+						lines.push(`    trigger: ${shortenHome(proj.path)}`);
+						if (proj.root && proj.root !== proj.path) {
+							lines.push(`    source:  ${shortenHome(proj.root)}`);
+						}
+						lines.push(`    tokens:  ${formatTokens(projTokens)}`);
+
+						// File list
+						lines.push(`    files:`);
+						for (const ft of fileTokens) {
+							const indicator = !ft.exists ? "?" : active ? "●" : "○";
+							const tokenLabel = ft.exists ? ` (${formatTokens(ft.tokens)})` : "";
+							lines.push(`      ${indicator} ${ft.rel}${tokenLabel}`);
 						}
 						if (proj.memory) {
-							const memFiles = readMemoryDir(root, proj.memory);
-							const memTokens = memFiles.reduce((sum, f) => sum + estimateTokens(f.content), 0);
-							projTokens += memTokens;
-							lines.push(`    ↳ memory: ${proj.memory} (${memFiles.length} file(s), ${formatTokens(memTokens)})`);
+							lines.push(`      ↳ memory: ${proj.memory} (${memFiles.length} file(s), ${formatTokens(memTokens)})`);
 						}
-						lines.push(`    subtotal: ${formatTokens(projTokens)}`);
 					}
 				}
 
