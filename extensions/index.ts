@@ -17,7 +17,6 @@
  * Commands: /bedrock [status|list|add <text>|clear|reload]
  */
 
-import * as fs from "node:fs";
 import * as path from "node:path";
 import type {
 	ExtensionAPI,
@@ -28,13 +27,15 @@ import type {
 import type { ProjectConfig } from "./types.js";
 import { loadConfig, CONFIG_PATH } from "./config.js";
 import { isInsidePath } from "./paths.js";
-import { readFiles, readMemoryDir } from "./files.js";
+import { readFile, readFiles, readMemoryDir, findMissingFiles } from "./files.js";
 import { formatSection } from "./format.js";
+import { estimateTokens, formatTokens } from "./tokens.js";
 
 export default function piBedrock(pi: ExtensionAPI) {
 	let { config, warn } = loadConfig();
 	const ephemeralContext: string[] = [];
 	let duplicationWarnings: string[] = [];
+	let lastInjectionTokens: number | null = null;
 
 	function reload(): void {
 		({ config, warn } = loadConfig());
@@ -50,15 +51,46 @@ export default function piBedrock(pi: ExtensionAPI) {
 		if (!ctx.hasUI) return;
 		const cwd = ctx.cwd ?? process.cwd();
 		const activeProjects = getActiveProjects(cwd);
+		const tokenInfo = lastInjectionTokens !== null ? ` (${formatTokens(lastInjectionTokens)})` : "";
 		const label = warn
 			? ctx.ui.theme.fg("dim", "pi-bedrock: inactive (config missing/invalid)")
 			: ctx.ui.theme.fg(
 					"dim",
 					`pi-bedrock: ${config!.core.length} core` +
 						`${config!.projects.length ? ` / ${activeProjects.length} of ${config!.projects.length} project(s) active` : ""}` +
-						`${ephemeralContext.length ? ` + ${ephemeralContext.length} ephemeral` : ""}`,
+						`${ephemeralContext.length ? ` + ${ephemeralContext.length} ephemeral` : ""}` +
+						tokenInfo,
 				);
 		ctx.ui.setStatus("pi-bedrock", label + ctx.ui.theme.fg("dim", "  │"));
+	}
+
+	function checkMissingFiles(ctx: ExtensionContext): void {
+		if (!config || !ctx.hasUI) return;
+		const missing: string[] = [];
+
+		// Core files
+		for (const rel of findMissingFiles(config.vault, config.core)) {
+			missing.push(`core: ${rel}`);
+		}
+
+		// Active project files
+		const cwd = ctx.cwd ?? process.cwd();
+		for (const proj of config.projects) {
+			if (!isInsidePath(cwd, proj.path)) continue;
+			const root = proj.root ?? proj.path;
+			const label = proj.name ?? path.basename(proj.path);
+			for (const rel of findMissingFiles(root, proj.files)) {
+				missing.push(`${label}: ${rel}`);
+			}
+		}
+
+		if (missing.length > 0) {
+			ctx.ui.notify(
+				`pi-bedrock: ${missing.length} configured file(s) not found (silent context loss!):\n` +
+					missing.map((m) => `  • ${m}`).join("\n"),
+				"warning",
+			);
+		}
 	}
 
 	pi.on("session_start", async (_event: SessionStartEvent, ctx: ExtensionContext) => {
@@ -96,6 +128,7 @@ export default function piBedrock(pi: ExtensionAPI) {
 		}
 
 		if (warn) ctx.ui.notify(`pi-bedrock: ${warn}`, "warning");
+		checkMissingFiles(ctx);
 	});
 
 	pi.on("before_agent_start", async (event: BeforeAgentStartEvent, ctx: ExtensionContext) => {
@@ -133,12 +166,17 @@ export default function piBedrock(pi: ExtensionAPI) {
 			);
 		}
 
-		if (sections.length === 0) return undefined;
+		if (sections.length === 0) {
+			lastInjectionTokens = 0;
+			return undefined;
+		}
 
 		const injection =
 			"\n\n<!-- pi-bedrock: injected rules (compaction-proof) -->\n" +
 			sections.join("\n") +
 			"\n<!-- /pi-bedrock -->\n";
+
+		lastInjectionTokens = estimateTokens(injection);
 
 		return {
 			systemPrompt: event.systemPrompt + injection,
@@ -176,6 +214,7 @@ export default function piBedrock(pi: ExtensionAPI) {
 				reload();
 				showStatus(ctx);
 				ctx.ui.notify(warn ? `pi-bedrock: ${warn}` : "pi-bedrock: config reloaded.", warn ? "warning" : "info");
+				checkMissingFiles(ctx);
 				return;
 			}
 
@@ -188,14 +227,25 @@ export default function piBedrock(pi: ExtensionAPI) {
 				const lines: string[] = [];
 
 				lines.push(`vault: ${config.vault}`);
+				if (lastInjectionTokens !== null) {
+					lines.push(`total injection: ${formatTokens(lastInjectionTokens)}`);
+				}
 				lines.push("");
-				lines.push("── Core (always injected) ──");
+				let coreSectionTokens = 0;
+				const coreTokenDetails: string[] = [];
 				for (const rel of config.core) {
-					const exists = fs.existsSync(path.join(config.vault, rel));
+					const abs = path.join(config.vault, rel);
+					const content = readFile(abs);
+					const exists = content !== null;
 					const indicator = exists ? "●" : "?";
 					const dup = duplicationWarnings.includes(rel) ? " ⚠ also in AGENTS.md" : "";
-					lines.push(`  ${indicator} ${rel}${dup}`);
+					const tokens = exists ? estimateTokens(content) : 0;
+					coreSectionTokens += tokens;
+					const tokenLabel = exists ? ` (${formatTokens(tokens)})` : "";
+					coreTokenDetails.push(`  ${indicator} ${rel}${tokenLabel}${dup}`);
 				}
+				lines.push(`── Core (always injected) ── ${formatTokens(coreSectionTokens)}`);
+				lines.push(...coreTokenDetails);
 
 				if (config.projects.length > 0) {
 					lines.push("");
@@ -204,22 +254,34 @@ export default function piBedrock(pi: ExtensionAPI) {
 						const active = isInsidePath(cwd, proj.path);
 						const root = proj.root ?? proj.path;
 						const label = proj.name ?? path.basename(proj.path);
+						let projTokens = 0;
 						lines.push(`  ${active ? "●" : "○"} ${label} (${proj.path})${active ? " — ACTIVE" : ""}`);
 						if (proj.root) lines.push(`    root: ${proj.root}`);
 						for (const rel of proj.files) {
-							const exists = fs.existsSync(path.join(root, rel));
+							const filePath = path.join(root, rel);
+							const content = readFile(filePath);
+							const exists = content !== null;
 							const indicator = !exists ? "?" : active ? "●" : "○";
-							lines.push(`    ${indicator} ${rel}`);
+							const tokens = exists ? estimateTokens(content) : 0;
+							projTokens += tokens;
+							const tokenLabel = exists ? ` (${formatTokens(tokens)})` : "";
+							lines.push(`    ${indicator} ${rel}${tokenLabel}`);
 						}
 						if (proj.memory) {
 							const memFiles = readMemoryDir(root, proj.memory);
-							lines.push(`    ↳ memory: ${proj.memory} (${memFiles.length} file(s))`);
+							const memTokens = memFiles.reduce((sum, f) => sum + estimateTokens(f.content), 0);
+							projTokens += memTokens;
+							lines.push(`    ↳ memory: ${proj.memory} (${memFiles.length} file(s), ${formatTokens(memTokens)})`);
 						}
+						lines.push(`    subtotal: ${formatTokens(projTokens)}`);
 					}
 				}
 
 				lines.push("");
-				lines.push(`── Ephemeral (session-scoped, ${ephemeralContext.length} item(s)) ──`);
+				const ephTokens = ephemeralContext.length > 0
+					? estimateTokens(ephemeralContext.join("\n"))
+					: 0;
+				lines.push(`── Ephemeral (session-scoped, ${ephemeralContext.length} item(s)) ──${ephTokens > 0 ? " " + formatTokens(ephTokens) : ""}`);
 				if (ephemeralContext.length === 0) {
 					lines.push("  (none)");
 				} else {

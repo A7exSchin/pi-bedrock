@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { readFile, readFiles, readMemoryDir } from "../extensions/files.js";
+import { readFile, readFiles, readMemoryDir, findMissingFiles } from "../extensions/files.js";
 
 let tmpDir: string;
 
@@ -65,5 +65,28 @@ describe("readMemoryDir", () => {
 
 	it("returns empty array for a missing directory", () => {
 		expect(readMemoryDir(tmpDir, "nope")).toHaveLength(0);
+	});
+});
+
+describe("findMissingFiles", () => {
+	it("returns empty array when all files exist", () => {
+		fs.writeFileSync(path.join(tmpDir, "a.md"), "A");
+		fs.writeFileSync(path.join(tmpDir, "b.md"), "B");
+		expect(findMissingFiles(tmpDir, ["a.md", "b.md"])).toEqual([]);
+	});
+
+	it("returns relative paths of missing files", () => {
+		fs.writeFileSync(path.join(tmpDir, "exists.md"), "ok");
+		const missing = findMissingFiles(tmpDir, ["exists.md", "gone.md", "also-gone.md"]);
+		expect(missing).toEqual(["gone.md", "also-gone.md"]);
+	});
+
+	it("returns all paths when none exist", () => {
+		const missing = findMissingFiles(tmpDir, ["x.md", "y.md"]);
+		expect(missing).toEqual(["x.md", "y.md"]);
+	});
+
+	it("returns empty array for empty input", () => {
+		expect(findMissingFiles(tmpDir, [])).toEqual([]);
 	});
 });

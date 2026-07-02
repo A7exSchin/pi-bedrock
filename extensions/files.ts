@@ -22,6 +22,20 @@ export function readFiles(root: string, relatives: string[]): LoadedFile[] {
 	return results;
 }
 
+/** Return relative paths from the list that don't exist on disk. */
+export function findMissingFiles(root: string, relatives: string[]): string[] {
+	const missing: string[] = [];
+	for (const rel of relatives) {
+		const abs = path.join(root, rel);
+		try {
+			fs.accessSync(abs);
+		} catch {
+			missing.push(rel);
+		}
+	}
+	return missing;
+}
+
 export function readMemoryDir(root: string, memDir: string): LoadedFile[] {
 	const abs = path.join(root, memDir);
 	try {
