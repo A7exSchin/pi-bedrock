@@ -11,6 +11,14 @@ export interface ProjectConfig {
 	memory?: string;
 }
 
+export interface ModeConfig {
+	/**
+	 * Files relative to the vault root, injected compaction-proof for the whole
+	 * session while this mode is active. May be empty (mode injects nothing).
+	 */
+	files: string[];
+}
+
 export interface Config {
 	/** Absolute path to the vault root (~ expanded). Root for core files. */
 	vault: string;
@@ -18,6 +26,12 @@ export interface Config {
 	core: string[];
 	/** Project-scoped context — injected when cwd is inside project path. */
 	projects: ProjectConfig[];
+	/**
+	 * Session modes, keyed by mode name. A mode is bound to a session at start
+	 * (while empty) and immutable thereafter; its files inject for the whole
+	 * session. Files resolve relative to `vault`.
+	 */
+	modes: Record<string, ModeConfig>;
 }
 
 export interface LoadedFile {
@@ -29,4 +43,6 @@ export interface LoadedFile {
 export interface LoadResult {
 	config: Config | null;
 	warn: string | null;
+	/** Non-fatal warnings (e.g. a mode name colliding with a reserved subcommand). */
+	notes: string[];
 }

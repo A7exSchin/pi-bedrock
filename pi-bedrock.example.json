@@ -1,5 +1,5 @@
 {
-  "_comment": "pi-bedrock config. core = always injected (relative to vault). projects = injected when cwd is inside their path; files/memory resolve from root (defaults to path).",
+  "_comment": "pi-bedrock config. core = always injected (relative to vault). projects = injected when cwd is inside their path; files/memory resolve from root (defaults to path). modes = session-bound behavioral context, keyed by name, activated with /bedrock <mode> on an empty session; files resolve relative to vault.",
   "vault": "~/GitLib/dev.a7exschin.knowledge",
   "core": [
     "_core/me.md",
@@ -21,5 +21,10 @@
       "files": ["02-knowledge/my-app-runbook.md"],
       "memory": "03-agents/03-memory/"
     }
-  ]
+  ],
+  "modes": {
+    "learn": {
+      "files": ["03-agents/01-prompts/learning-mode.md"]
+    }
+  }
 }

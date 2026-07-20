@@ -99,4 +99,61 @@ describe("loadConfig", () => {
 		expect(config?.projects[0].root).toBe(path.join(os.homedir(), "vault"));
 		expect(config?.projects[1].root).toBeUndefined();
 	});
+
+	it("defaults modes to an empty object when absent", () => {
+		writeConfig({ vault: "/v", core: ["a.md"] });
+		const { config, notes } = loadConfig(configPath);
+		expect(config?.modes).toEqual({});
+		expect(notes).toEqual([]);
+	});
+
+	it("parses modes keyed by name with a files list", () => {
+		writeConfig({
+			vault: "/v",
+			core: ["a.md"],
+			modes: { learn: { files: ["prompts/learn.md"] } },
+		});
+		const { config } = loadConfig(configPath);
+		expect(config?.modes.learn.files).toEqual(["prompts/learn.md"]);
+	});
+
+	it("allows a mode with an empty files list", () => {
+		writeConfig({ vault: "/v", core: ["a.md"], modes: { bare: { files: [] } } });
+		const { config } = loadConfig(configPath);
+		expect(config?.modes.bare.files).toEqual([]);
+	});
+
+	it("defaults a mode's files to [] when missing or non-array and filters non-strings", () => {
+		writeConfig({
+			vault: "/v",
+			core: ["a.md"],
+			modes: {
+				nofiles: {},
+				badfiles: { files: "nope" },
+				mixed: { files: ["ok.md", 42, null, "also.md"] },
+			},
+		});
+		const { config } = loadConfig(configPath);
+		expect(config?.modes.nofiles.files).toEqual([]);
+		expect(config?.modes.badfiles.files).toEqual([]);
+		expect(config?.modes.mixed.files).toEqual(["ok.md", "also.md"]);
+	});
+
+	it("ignores modes whose name collides with a reserved subcommand and notes it", () => {
+		writeConfig({
+			vault: "/v",
+			core: ["a.md"],
+			modes: { list: { files: ["x.md"] }, learn: { files: ["y.md"] } },
+		});
+		const { config, notes } = loadConfig(configPath);
+		expect(config?.modes.list).toBeUndefined();
+		expect(config?.modes.learn).toBeDefined();
+		expect(notes.some((n) => n.includes("list"))).toBe(true);
+	});
+
+	it("ignores a non-object modes value", () => {
+		writeConfig({ vault: "/v", core: ["a.md"], modes: ["learn"] });
+		const { config } = loadConfig(configPath);
+		expect(config?.modes).toEqual({});
+	});
 });

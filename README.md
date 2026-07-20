@@ -19,10 +19,11 @@ Edit `~/.pi/agent/pi-bedrock.json` to your needs. The extension loads on next pi
 
 ## What it does
 
-pi-bedrock hooks `before_agent_start` and re-reads its configured files from disk on every turn, appending them to the system prompt inside `<!-- pi-bedrock -->` markers. Three tiers:
+pi-bedrock hooks `before_agent_start` and re-reads its configured files from disk on every turn, appending them to the system prompt inside `<!-- pi-bedrock -->` markers. Four tiers:
 
 - **Core** — files relative to the vault root, injected **every session** regardless of cwd.
 - **Projects** — files injected only when the cwd is inside a project's `path`. Each project may name a `memory` directory whose `.md` files are all scanned.
+- **Modes** — a named, session-bound behavioral context. A mode is activated with `/bedrock <mode>` on an **empty session** and is **immutable once the first turn happens** — it cannot be switched or deactivated for that session. The bound mode is persisted in the session, so it survives `/reload` and `/resume`. Its files resolve relative to `vault`.
 - **Ephemeral** — session-scoped strings added at runtime via `/bedrock add`, cleared with `/bedrock clear`.
 
 On `session_start` it also warns if any injected file is already loaded via `AGENTS.md`/context files, to avoid double token usage.
@@ -47,7 +48,12 @@ Config lives at `~/.pi/agent/pi-bedrock.json` (override with env `PI_BEDROCK_CON
       "files": ["_core/meta.md"],
       "memory": "03-agents/03-memory/"
     }
-  ]
+  ],
+  "modes": {
+    "learn": {
+      "files": ["03-agents/01-prompts/learning-mode.md"]
+    }
+  }
 }
 ```
 
@@ -61,6 +67,23 @@ Config lives at `~/.pi/agent/pi-bedrock.json` (override with env `PI_BEDROCK_CON
 | `projects[].root` | no | Directory where `files` and `memory` resolve from. Defaults to `path`. |
 | `projects[].files` | yes | Files relative to `root` (or `path` if root unset). |
 | `projects[].memory` | no | Directory relative to `root` (or `path`); all `.md` files injected. |
+| `modes` | no | Session modes keyed by name (see below). |
+| `modes.<name>.files` | yes | Files (relative to `vault`) injected while the mode is active. May be empty (injects nothing). A mode name must not shadow a reserved subcommand (`status`, `list`, `add`, `clear`, `reload`). |
+
+## Modes
+
+A mode injects a fixed, session-long behavioral contract (e.g. a Socratic "learning" persona) that stays compaction-proof for the whole session.
+
+```
+/bedrock learn        Bind the "learn" mode to the current session
+```
+
+Semantics:
+
+- A mode can only be bound while the session is **empty** (no user/assistant turns yet). Re-binding a different mode while still empty just overwrites the choice.
+- After the **first turn**, the mode is **locked** for the session's lifetime — there is no deactivation.
+- On a session that already has history, activation is refused; start a fresh session with `/new`, then bind the mode.
+- The bound mode is stored as a session entry (not in LLM context) and restored on `/reload` and `/resume`.
 
 ## Commands
 
@@ -71,6 +94,7 @@ Config lives at `~/.pi/agent/pi-bedrock.json` (override with env `PI_BEDROCK_CON
 /bedrock add <text>   Add a session-scoped ephemeral note
 /bedrock clear        Clear all ephemeral notes
 /bedrock reload       Re-read config from disk
+/bedrock <mode>       Bind a configured session mode (empty session only)
 ```
 
 ## Indicators

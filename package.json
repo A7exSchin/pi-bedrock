@@ -1,6 +1,6 @@
 {
   "name": "pi-bedrock",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Pi extension that injects vault core files, project-scoped files, and ephemeral notes into the system prompt — compaction-proof context.",
   "keywords": [
     "pi-package"

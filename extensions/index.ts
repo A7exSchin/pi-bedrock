@@ -24,22 +24,29 @@ import type {
 	BeforeAgentStartEvent,
 	SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import type { ProjectConfig } from "./types.js";
-import { loadConfig, CONFIG_PATH } from "./config.js";
+import { loadConfig, CONFIG_PATH, RESERVED_SUBCOMMANDS } from "./config.js";
 import { isInsidePath, shortenHome } from "./paths.js";
 import { readFile, readFiles, readMemoryDir, findMissingFiles } from "./files.js";
 import { formatSection } from "./format.js";
 import { estimateTokens, formatTokens } from "./tokens.js";
 
+/** Custom session-entry type used to persist the bound mode across reload/resume. */
+const MODE_ENTRY_TYPE = "bedrock-mode";
+
 export default function piBedrock(pi: ExtensionAPI) {
-	let { config, warn } = loadConfig();
+	let { config, warn, notes } = loadConfig();
 	const ephemeralContext: string[] = [];
 	let duplicationWarnings: string[] = [];
 	let lastInjectionTokens: number | null = null;
+	/** Mode bound to this session (immutable once the first turn happens). */
+	let activeMode: string | null = null;
 
 	function reload(): void {
-		({ config, warn } = loadConfig());
+		({ config, warn, notes } = loadConfig());
 		duplicationWarnings = [];
+		// activeMode is session state, not config — preserved across reload.
 	}
 
 	function getActiveProjects(cwd: string): ProjectConfig[] {
@@ -47,11 +54,33 @@ export default function piBedrock(pi: ExtensionAPI) {
 		return config.projects.filter((p) => isInsidePath(cwd, p.path));
 	}
 
+	/** True when the session already contains a real user/assistant turn. */
+	function hasConversation(ctx: ExtensionContext): boolean {
+		const entries = ctx.sessionManager?.getEntries?.() ?? [];
+		return entries.some(
+			(e: any) =>
+				e?.type === "message" && (e.message?.role === "user" || e.message?.role === "assistant"),
+		);
+	}
+
+	/** Restore the bound mode from the session's last mode marker entry. */
+	function restoreActiveMode(ctx: ExtensionContext): void {
+		const entries = ctx.sessionManager?.getEntries?.() ?? [];
+		let found: string | null = null;
+		for (const e of entries as any[]) {
+			if (e?.type === "custom" && e.customType === MODE_ENTRY_TYPE && typeof e.data?.mode === "string") {
+				found = e.data.mode;
+			}
+		}
+		activeMode = found;
+	}
+
 	function showStatus(ctx: ExtensionContext): void {
 		if (!ctx.hasUI) return;
 		const cwd = ctx.cwd ?? process.cwd();
 		const activeProjects = getActiveProjects(cwd);
 		const tokenInfo = lastInjectionTokens !== null ? ` (${formatTokens(lastInjectionTokens)})` : "";
+		const modeInfo = activeMode ? ` · mode: ${activeMode}` : "";
 		const label = warn
 			? ctx.ui.theme.fg("dim", "pi-bedrock: inactive (config missing/invalid)")
 			: ctx.ui.theme.fg(
@@ -59,6 +88,7 @@ export default function piBedrock(pi: ExtensionAPI) {
 					`pi-bedrock: ${config!.core.length} core` +
 						`${config!.projects.length ? ` / ${activeProjects.length} of ${config!.projects.length} project(s) active` : ""}` +
 						`${ephemeralContext.length ? ` + ${ephemeralContext.length} ephemeral` : ""}` +
+						modeInfo +
 						tokenInfo,
 				);
 		ctx.ui.setStatus("pi-bedrock", label + ctx.ui.theme.fg("dim", "  │"));
@@ -84,6 +114,13 @@ export default function piBedrock(pi: ExtensionAPI) {
 			}
 		}
 
+		// Active mode files
+		if (activeMode && config.modes[activeMode]) {
+			for (const rel of findMissingFiles(config.vault, config.modes[activeMode].files)) {
+				missing.push(`mode ${activeMode}: ${rel}`);
+			}
+		}
+
 		if (missing.length > 0) {
 			ctx.ui.notify(
 				`pi-bedrock: ${missing.length} configured file(s) not found (silent context loss!):\n` +
@@ -94,8 +131,25 @@ export default function piBedrock(pi: ExtensionAPI) {
 	}
 
 	pi.on("session_start", async (_event: SessionStartEvent, ctx: ExtensionContext) => {
+		restoreActiveMode(ctx);
 		showStatus(ctx);
 		if (!config || !ctx.hasUI) return;
+
+		// Surface non-fatal config notes (e.g. mode name collisions)
+		for (const note of notes) {
+			ctx.ui.notify(`pi-bedrock: ${note}`, "warning");
+		}
+
+		if (activeMode) {
+			if (config.modes[activeMode]) {
+				ctx.ui.notify(`pi-bedrock: session mode "${activeMode}" active (locked for this session).`, "info");
+			} else {
+				ctx.ui.notify(
+					`pi-bedrock: session bound to mode "${activeMode}" but it is no longer in config — nothing injected.`,
+					"warning",
+				);
+			}
+		}
 
 		// Check for duplication with already-loaded context files
 		const options = ctx.getSystemPromptOptions?.();
@@ -144,6 +198,13 @@ export default function piBedrock(pi: ExtensionAPI) {
 		const c = formatSection("Core Rules (always active)", coreFiles);
 		if (c) sections.push(c);
 
+		// Session mode — behavioral contract bound to this session
+		if (activeMode && config.modes[activeMode]) {
+			const modeFiles = readFiles(config.vault, config.modes[activeMode].files);
+			const ms = formatSection(`Session Mode: ${activeMode} (active for this session)`, modeFiles);
+			if (ms) sections.push(ms);
+		}
+
 		// Project-scoped context
 		for (const proj of config.projects) {
 			if (!isInsidePath(cwd, proj.path)) continue;
@@ -185,7 +246,17 @@ export default function piBedrock(pi: ExtensionAPI) {
 
 	pi.registerCommand("bedrock", {
 		description:
-			"pi-bedrock: status, list loaded context, add/clear ephemeral context. Usage: /bedrock [status|list|add <text>|clear|reload]",
+			"pi-bedrock: status, list, add/clear ephemeral context, or bind a session mode. Usage: /bedrock [status|list|add <text>|clear|reload|<mode>]",
+		getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
+			const items: AutocompleteItem[] = RESERVED_SUBCOMMANDS.map((s) => ({ value: s, label: s }));
+			if (config) {
+				for (const name of Object.keys(config.modes)) {
+					items.push({ value: name, label: name, description: "session mode" });
+				}
+			}
+			const filtered = items.filter((i) => i.value.startsWith(prefix));
+			return filtered.length > 0 ? filtered : null;
+		},
 		handler: async (args: string, ctx: ExtensionContext) => {
 			const toks = args.trim().split(/\s+/);
 			const sub = (toks[0] ?? "").toLowerCase();
@@ -296,6 +367,32 @@ export default function piBedrock(pi: ExtensionAPI) {
 				}
 
 				lines.push("");
+				const modeNames = Object.keys(config.modes);
+				lines.push(`── Modes (${modeNames.length} configured) ──`);
+				if (modeNames.length === 0) {
+					lines.push("  (none)");
+				} else {
+					for (const name of modeNames) {
+						const isActive = activeMode === name;
+						const files = config.modes[name].files;
+						let modeTokens = 0;
+						const fileLines: string[] = [];
+						for (const rel of files) {
+							const content = readFile(path.join(config.vault, rel));
+							const exists = content !== null;
+							const tokens = exists ? estimateTokens(content) : 0;
+							modeTokens += tokens;
+							const indicator = !exists ? "?" : isActive ? "●" : "○";
+							fileLines.push(`      ${indicator} ${rel}${exists ? ` (${formatTokens(tokens)})` : ""}`);
+						}
+						lines.push(
+							`  ${isActive ? "●" : "○"} ${name}${isActive ? " — ACTIVE" : ""} (${files.length} file(s), ${formatTokens(modeTokens)})`,
+						);
+						lines.push(...fileLines);
+					}
+				}
+
+				lines.push("");
 				const ephTokens = ephemeralContext.length > 0
 					? estimateTokens(ephemeralContext.join("\n"))
 					: 0;
@@ -313,6 +410,51 @@ export default function piBedrock(pi: ExtensionAPI) {
 			}
 
 			// Default: status
+			// Mode activation: /bedrock <modename>
+			if (sub && config && config.modes[sub]) {
+				if (activeMode === sub) {
+					ctx.ui.notify(`pi-bedrock: mode "${sub}" already active for this session.`, "info");
+					return;
+				}
+				if (hasConversation(ctx)) {
+					ctx.ui.notify(
+						`pi-bedrock: cannot set mode "${sub}" — this session already has history. ` +
+							`Modes bind at session start. Run /new, then /bedrock ${sub}.`,
+						"warning",
+					);
+					return;
+				}
+				// Empty session: bind (re-binding while still empty overwrites the choice)
+				activeMode = sub;
+				pi.appendEntry(MODE_ENTRY_TYPE, { mode: sub });
+				showStatus(ctx);
+				const fileCount = config.modes[sub].files.length;
+				if (fileCount === 0) {
+					ctx.ui.notify(
+						`pi-bedrock: mode "${sub}" bound to this session, but it has no files — nothing will be injected.`,
+						"warning",
+					);
+				} else {
+					ctx.ui.notify(
+						`pi-bedrock: mode "${sub}" bound to this session (${fileCount} file(s)). Locked after the first turn.`,
+						"info",
+					);
+				}
+				return;
+			}
+
+			// Unknown token: neither a subcommand nor a configured mode
+			if (sub && sub !== "status") {
+				const modeNames = config ? Object.keys(config.modes) : [];
+				ctx.ui.notify(
+					`pi-bedrock: unknown command "${sub}". Subcommands: ${RESERVED_SUBCOMMANDS.join(", ")}.` +
+						(modeNames.length ? ` Modes: ${modeNames.join(", ")}.` : ""),
+					"warning",
+				);
+				return;
+			}
+
+			// Default: status
 			showStatus(ctx);
 			if (!config) {
 				ctx.ui.notify(warn ? `pi-bedrock: ${warn}` : "pi-bedrock: not configured.", "warning");
@@ -324,6 +466,7 @@ export default function piBedrock(pi: ExtensionAPI) {
 				`pi-bedrock: ${config.core.length} core` +
 					`${config.projects.length ? `, ${config.projects.length} project(s) (${activeProjects.length} active)` : ""}` +
 					`${ephemeralContext.length ? `, ${ephemeralContext.length} ephemeral` : ""}` +
+					`${activeMode ? `, mode: ${activeMode}` : ""}` +
 					`. Vault: ${config.vault}. Source: ${CONFIG_PATH}.`,
 				"info",
 			);
